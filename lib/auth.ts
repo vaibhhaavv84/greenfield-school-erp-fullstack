@@ -13,7 +13,8 @@ export type SessionUser = {
 };
 
 const encoder = new TextEncoder();
-const ITERATIONS = 210000;
+// Cloudflare Workers currently caps Web Crypto PBKDF2 at 100,000 iterations.
+const ITERATIONS = 100000;
 const COOKIE_NAME = "greenfield_session";
 
 function bytesToHex(bytes: Uint8Array) {

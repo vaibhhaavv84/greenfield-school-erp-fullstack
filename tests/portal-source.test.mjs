@@ -31,3 +31,14 @@ test("database has no seeded student or faculty records", async () => {
   assert.doesNotMatch(database, /INSERT INTO students .*VALUES/i);
   assert.doesNotMatch(database, /INSERT INTO teachers .*VALUES/i);
 });
+
+test("password hashing stays within the Cloudflare Workers PBKDF2 limit", async () => {
+  const [auth, database] = await Promise.all([
+    readFile(new URL("lib/auth.ts", root), "utf8"),
+    readFile(new URL("lib/database.ts", root), "utf8"),
+  ]);
+  const iterations = auth.match(/const ITERATIONS = (\d+);/);
+  assert.ok(iterations, "Password iteration constant is missing");
+  assert.ok(Number(iterations[1]) <= 100000, "Cloudflare Workers supports at most 100,000 PBKDF2 iterations");
+  assert.match(database, /password_iterations INTEGER NOT NULL DEFAULT 100000/);
+});
