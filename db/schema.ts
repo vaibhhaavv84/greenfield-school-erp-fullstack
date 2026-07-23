@@ -142,3 +142,127 @@ export const auditLog = sqliteTable("audit_log", {
   details: text("details"),
   createdAt: text("created_at").notNull(),
 });
+
+export const schoolClasses = sqliteTable("school_classes", {
+  id: text("id").primaryKey(),
+  className: text("class_name").notNull(),
+  section: text("section").notNull(),
+  level: text("level").notNull(),
+  classTeacherId: text("class_teacher_id"),
+  subjects: text("subjects").notNull().default("[]"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const teacherProfiles = sqliteTable("teacher_profiles", {
+  teacherId: text("teacher_id").primaryKey(),
+  category: text("category").notNull().default("Primary / Junior"),
+  designation: text("designation").notNull().default("Teacher"),
+  classTeacherClasses: text("class_teacher_classes").notNull().default("[]"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const feePlans = sqliteTable("fee_plans", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  academicYear: text("academic_year").notNull(),
+  className: text("class_name").notNull(),
+  section: text("section").notNull().default(""),
+  totalAmount: real("total_amount").notNull(),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const feePlanItems = sqliteTable("fee_plan_items", {
+  id: text("id").primaryKey(),
+  planId: text("plan_id").notNull(),
+  sequenceNo: integer("sequence_no").notNull(),
+  label: text("label").notNull(),
+  amount: real("amount").notNull(),
+  dueDate: text("due_date").notNull(),
+});
+
+export const studentFeePlans = sqliteTable("student_fee_plans", {
+  id: text("id").primaryKey(),
+  studentId: text("student_id").notNull(),
+  planId: text("plan_id").notNull(),
+  assignedAmount: real("assigned_amount").notNull(),
+  assignedAt: text("assigned_at").notNull(),
+});
+
+export const paymentReceipts = sqliteTable("payment_receipts", {
+  paymentId: text("payment_id").primaryKey(),
+  receiptNo: text("receipt_no").notNull().unique(),
+  installmentLabel: text("installment_label"),
+  createdAt: text("created_at").notNull(),
+});
+
+export const attendanceRecords = sqliteTable("attendance_records", {
+  id: text("id").primaryKey(),
+  personType: text("person_type", { enum: ["student", "teacher"] }).notNull(),
+  personId: text("person_id").notNull(),
+  attendanceDate: text("attendance_date").notNull(),
+  status: text("status", { enum: ["present", "absent", "late", "half_day", "leave"] }).notNull(),
+  note: text("note"),
+  markedBy: integer("marked_by"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const examSchedules = sqliteTable("exam_schedules", {
+  id: text("id").primaryKey(),
+  examName: text("exam_name").notNull(),
+  className: text("class_name").notNull(),
+  section: text("section").notNull().default(""),
+  subject: text("subject").notNull(),
+  examDate: text("exam_date").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time"),
+  room: text("room"),
+  syllabus: text("syllabus").notNull(),
+  maxMarks: real("max_marks").notNull().default(100),
+  published: integer("published", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const examResults = sqliteTable("exam_results", {
+  id: text("id").primaryKey(),
+  examId: text("exam_id"),
+  examName: text("exam_name").notNull(),
+  studentId: text("student_id").notNull(),
+  subject: text("subject").notNull(),
+  marks: real("marks").notNull(),
+  maxMarks: real("max_marks").notNull(),
+  grade: text("grade"),
+  remarks: text("remarks"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const galleryEvents = sqliteTable("gallery_events", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  eventDate: text("event_date").notNull(),
+  category: text("category").notNull().default("School event"),
+  description: text("description"),
+  published: integer("published", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const mediaAssets = sqliteTable("media_assets", {
+  id: text("id").primaryKey(),
+  ownerType: text("owner_type").notNull(),
+  ownerId: text("owner_id").notNull(),
+  kind: text("kind").notNull(),
+  objectKey: text("object_key").notNull(),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  caption: text("caption"),
+  uploadedBy: integer("uploaded_by"),
+  createdAt: text("created_at").notNull(),
+});
