@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 type SchoolEnv = {
   DB: D1Database;
+  MEDIA?: R2Bucket;
   SETUP_KEY?: string;
 };
 
@@ -26,12 +27,31 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS notices (id TEXT PRIMARY KEY, title TEXT NOT NULL, notice_date TEXT NOT NULL, body TEXT NOT NULL, audience TEXT NOT NULL DEFAULT 'all', created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS gallery (id TEXT PRIMARY KEY, title TEXT NOT NULL, event_date TEXT NOT NULL, image_url TEXT, created_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY, user_id INTEGER, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, details TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS school_classes (id TEXT PRIMARY KEY, class_name TEXT NOT NULL, section TEXT NOT NULL, level TEXT NOT NULL, class_teacher_id TEXT, subjects TEXT NOT NULL DEFAULT '[]', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(class_name,section))`,
+  `CREATE TABLE IF NOT EXISTS teacher_profiles (teacher_id TEXT PRIMARY KEY, category TEXT NOT NULL DEFAULT 'Primary / Junior', designation TEXT NOT NULL DEFAULT 'Teacher', class_teacher_classes TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS fee_plans (id TEXT PRIMARY KEY, name TEXT NOT NULL, academic_year TEXT NOT NULL, class_name TEXT NOT NULL, section TEXT NOT NULL DEFAULT '', total_amount REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS fee_plan_items (id TEXT PRIMARY KEY, plan_id TEXT NOT NULL, sequence_no INTEGER NOT NULL, label TEXT NOT NULL, amount REAL NOT NULL, due_date TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS student_fee_plans (id TEXT PRIMARY KEY, student_id TEXT NOT NULL, plan_id TEXT NOT NULL, assigned_amount REAL NOT NULL, assigned_at TEXT NOT NULL, UNIQUE(student_id,plan_id))`,
+  `CREATE TABLE IF NOT EXISTS payment_receipts (payment_id TEXT PRIMARY KEY, receipt_no TEXT NOT NULL UNIQUE, installment_label TEXT, created_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS attendance_records (id TEXT PRIMARY KEY, person_type TEXT NOT NULL CHECK(person_type IN ('student','teacher')), person_id TEXT NOT NULL, attendance_date TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('present','absent','late','half_day','leave')), note TEXT, marked_by INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(person_type,person_id,attendance_date))`,
+  `CREATE TABLE IF NOT EXISTS exam_schedules (id TEXT PRIMARY KEY, exam_name TEXT NOT NULL, class_name TEXT NOT NULL, section TEXT NOT NULL DEFAULT '', subject TEXT NOT NULL, exam_date TEXT NOT NULL, start_time TEXT NOT NULL, end_time TEXT, room TEXT, syllabus TEXT NOT NULL, max_marks REAL NOT NULL DEFAULT 100, published INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS exam_results (id TEXT PRIMARY KEY, exam_id TEXT, exam_name TEXT NOT NULL, student_id TEXT NOT NULL, subject TEXT NOT NULL, marks REAL NOT NULL, max_marks REAL NOT NULL, grade TEXT, remarks TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(exam_name,student_id,subject))`,
+  `CREATE TABLE IF NOT EXISTS gallery_events (id TEXT PRIMARY KEY, title TEXT NOT NULL, event_date TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'School event', description TEXT, published INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS media_assets (id TEXT PRIMARY KEY, owner_type TEXT NOT NULL, owner_id TEXT NOT NULL, kind TEXT NOT NULL, object_key TEXT NOT NULL, filename TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, caption TEXT, uploaded_by INTEGER, created_at TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions(user_id)`,
   `CREATE INDEX IF NOT EXISTS students_class_idx ON students(class_name, section)`,
   `CREATE INDEX IF NOT EXISTS homework_class_idx ON homework(class_name, due_date)`,
   `CREATE INDEX IF NOT EXISTS marks_student_idx ON marks(student_id)`,
   `CREATE INDEX IF NOT EXISTS attendance_person_idx ON attendance(person_type, person_id, attendance_date)`,
   `CREATE INDEX IF NOT EXISTS installments_student_idx ON fee_installments(student_id, paid_on)`,
+  `CREATE INDEX IF NOT EXISTS classes_teacher_idx ON school_classes(class_teacher_id)`,
+  `CREATE INDEX IF NOT EXISTS fee_plan_class_idx ON fee_plans(class_name,section,academic_year)`,
+  `CREATE INDEX IF NOT EXISTS fee_plan_items_idx ON fee_plan_items(plan_id,sequence_no)`,
+  `CREATE INDEX IF NOT EXISTS student_fee_plans_idx ON student_fee_plans(student_id)`,
+  `CREATE INDEX IF NOT EXISTS attendance_records_idx ON attendance_records(person_type,person_id,attendance_date)`,
+  `CREATE INDEX IF NOT EXISTS exam_schedule_class_idx ON exam_schedules(class_name,section,exam_date)`,
+  `CREATE INDEX IF NOT EXISTS exam_results_student_idx ON exam_results(student_id,exam_name)`,
+  `CREATE INDEX IF NOT EXISTS media_owner_idx ON media_assets(owner_type,owner_id)`,
 ];
 
 export async function ensureSchema(): Promise<void> {

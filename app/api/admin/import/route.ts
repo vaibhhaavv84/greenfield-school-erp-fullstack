@@ -24,7 +24,8 @@ function validateRows(data: {
   students: Record<string, unknown>[]; teachers: Record<string, unknown>[]; accounts: Record<string, unknown>[];
   installments: Record<string, unknown>[]; attendance: Record<string, unknown>[]; marks: Record<string, unknown>[];
   homework: Record<string, unknown>[]; curriculum: Record<string, unknown>[]; notices: Record<string, unknown>[];
-  gallery: Record<string, unknown>[];
+  gallery: Record<string, unknown>[]; classes: Record<string, unknown>[]; feePlans: Record<string, unknown>[];
+  exams: Record<string, unknown>[]; results: Record<string, unknown>[];
 }, mode: "replace" | "merge") {
   assertUnique(data.students, "student_id", "Students");
   assertUnique(data.students, "admission_no", "Students");
@@ -67,7 +68,7 @@ function validateRows(data: {
   }
   for (const row of data.attendance) {
     const type = cleanText(row.person_type).toLowerCase(); const status = cleanText(row.status).toLowerCase();
-    if (!["student", "teacher"].includes(type) || !["present", "absent", "late", "leave"].includes(status)) throw new Error("Attendance: person_type or status is invalid.");
+    if (!["student", "teacher"].includes(type) || !["present", "absent", "late", "half_day", "leave"].includes(status)) throw new Error("Attendance: person_type or status is invalid.");
     required(row.person_id, "person_id", "Attendance"); required(cleanDate(row.attendance_date), "attendance_date", "Attendance");
   }
   for (const row of data.marks) {
@@ -89,6 +90,10 @@ function validateRows(data: {
     if (!["all", "students", "teachers"].includes(cleanText(row.audience, "all").toLowerCase())) throw new Error("Notices: audience must be all, students, or teachers.");
   }
   for (const row of data.gallery) { required(row.title, "title", "Gallery"); required(cleanDate(row.event_date), "event_date", "Gallery"); }
+  for (const row of data.classes) { required(row.class_name, "class_name", "Classes"); required(row.level, "level", "Classes"); }
+  for (const row of data.feePlans) { required(row.name, "name", "FeePlans"); required(row.class_name, "class_name", "FeePlans"); if (cleanNumber(row.total_amount) <= 0) throw new Error("FeePlans: total_amount must be greater than zero."); }
+  for (const row of data.exams) { required(row.exam_name, "exam_name", "Exams"); required(row.class_name, "class_name", "Exams"); required(row.subject, "subject", "Exams"); required(cleanDate(row.exam_date), "exam_date", "Exams"); }
+  for (const row of data.results) { required(row.exam_name, "exam_name", "Results"); required(row.student_id, "student_id", "Results"); const score = cleanNumber(row.marks); const max = cleanNumber(row.max_marks); if (max <= 0 || score < 0 || score > max) throw new Error("Results: marks must be between 0 and max_marks."); }
 }
 
 export async function POST(request: Request) {
@@ -111,8 +116,12 @@ export async function POST(request: Request) {
     const curriculumRows = rows(data.curriculum);
     const noticeRows = rows(data.notices);
     const galleryRows = rows(data.gallery);
+    const classRows = rows(data.classes);
+    const feePlanRows = rows(data.feeplans);
+    const examRows = rows(data.exams);
+    const resultRows = rows(data.results);
 
-    validateRows({ students: studentRows, teachers: teacherRows, accounts: accountRows, installments: installmentRows, attendance: attendanceRows, marks: markRows, homework: homeworkRows, curriculum: curriculumRows, notices: noticeRows, gallery: galleryRows }, mode);
+    validateRows({ students: studentRows, teachers: teacherRows, accounts: accountRows, installments: installmentRows, attendance: attendanceRows, marks: markRows, homework: homeworkRows, curriculum: curriculumRows, notices: noticeRows, gallery: galleryRows, classes: classRows, feePlans: feePlanRows, exams: examRows, results: resultRows }, mode);
 
     if (mode === "replace") {
       await db.batch([
@@ -122,6 +131,9 @@ export async function POST(request: Request) {
         db.prepare("DELETE FROM fee_installments"), db.prepare("DELETE FROM attendance"), db.prepare("DELETE FROM marks"),
         db.prepare("DELETE FROM homework"), db.prepare("DELETE FROM curriculum"), db.prepare("DELETE FROM notices"),
         db.prepare("DELETE FROM gallery"), db.prepare("DELETE FROM students"), db.prepare("DELETE FROM teachers"),
+        db.prepare("DELETE FROM gallery_events"), db.prepare("DELETE FROM exam_results"), db.prepare("DELETE FROM exam_schedules"),
+        db.prepare("DELETE FROM attendance_records"), db.prepare("DELETE FROM payment_receipts"), db.prepare("DELETE FROM student_fee_plans"),
+        db.prepare("DELETE FROM fee_plan_items"), db.prepare("DELETE FROM fee_plans"), db.prepare("DELETE FROM teacher_profiles"), db.prepare("DELETE FROM school_classes"),
       ]);
     }
 
@@ -137,6 +149,8 @@ export async function POST(request: Request) {
       const id = cleanId(row.teacher_id, "TCH");
       statements.push(db.prepare(`INSERT INTO teachers (id,employee_no,name,subject,classes,phone,email,monthly_salary,salary_paid,attendance_percent,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET employee_no=excluded.employee_no,name=excluded.name,subject=excluded.subject,classes=excluded.classes,phone=excluded.phone,email=excluded.email,monthly_salary=excluded.monthly_salary,salary_paid=excluded.salary_paid,attendance_percent=excluded.attendance_percent,updated_at=excluded.updated_at`)
         .bind(id, required(row.employee_no, "employee_no", "Teachers"), required(row.name, "name", "Teachers"), required(row.subject, "subject", "Teachers"), JSON.stringify(parseClasses(row.classes)), required(row.phone, "phone", "Teachers"), cleanText(row.email) || null, cleanNumber(row.monthly_salary), cleanNumber(row.salary_paid), cleanNumber(row.attendance_percent), now, now));
+      statements.push(db.prepare(`INSERT INTO teacher_profiles (teacher_id,category,designation,class_teacher_classes,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(teacher_id) DO UPDATE SET category=excluded.category,designation=excluded.designation,class_teacher_classes=excluded.class_teacher_classes,updated_at=excluded.updated_at`)
+        .bind(id, cleanText(row.category, "Primary / Junior"), cleanText(row.designation, "Teacher"), JSON.stringify(parseClasses(row.class_teacher_classes)), now));
     }
     for (const row of installmentRows) {
       statements.push(db.prepare(`INSERT INTO fee_installments (id,student_id,amount,paid_on,mode,reference,note,recorded_by,created_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET student_id=excluded.student_id,amount=excluded.amount,paid_on=excluded.paid_on,mode=excluded.mode,reference=excluded.reference,note=excluded.note`)
@@ -145,63 +159,6 @@ export async function POST(request: Request) {
     for (const row of attendanceRows) {
       const type = cleanText(row.person_type).toLowerCase();
       const status = cleanText(row.status).toLowerCase();
-      if (!['student','teacher'].includes(type) || !['present','absent','late','leave'].includes(status)) throw new Error("Attendance: person_type or status is invalid.");
-      statements.push(db.prepare(`INSERT INTO attendance (id,person_type,person_id,attendance_date,status,note) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET person_type=excluded.person_type,person_id=excluded.person_id,attendance_date=excluded.attendance_date,status=excluded.status,note=excluded.note`)
-        .bind(cleanId(row.attendance_id, "ATT"), type, required(row.person_id, "person_id", "Attendance"), required(cleanDate(row.attendance_date), "attendance_date", "Attendance"), status, cleanText(row.note) || null));
-    }
-    for (const row of markRows) {
-      const max = cleanNumber(row.max_marks);
-      const score = cleanNumber(row.marks);
-      if (max <= 0 || score < 0 || score > max) throw new Error("Marks: marks must be between 0 and max_marks.");
-      statements.push(db.prepare(`INSERT INTO marks (id,student_id,term,subject,marks,max_marks) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET student_id=excluded.student_id,term=excluded.term,subject=excluded.subject,marks=excluded.marks,max_marks=excluded.max_marks`)
-        .bind(cleanId(row.mark_id, "MRK"), required(row.student_id, "student_id", "Marks"), required(row.term, "term", "Marks"), required(row.subject, "subject", "Marks"), score, max));
-    }
-    for (const row of homeworkRows) {
-      statements.push(db.prepare(`INSERT INTO homework (id,class_name,subject,teacher_id,title,instructions,due_date,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET class_name=excluded.class_name,subject=excluded.subject,teacher_id=excluded.teacher_id,title=excluded.title,instructions=excluded.instructions,due_date=excluded.due_date`)
-        .bind(cleanId(row.homework_id, "HW"), required(row.class_name, "class_name", "Homework").toUpperCase(), required(row.subject, "subject", "Homework"), required(row.teacher_id, "teacher_id", "Homework"), required(row.title, "title", "Homework"), required(row.instructions, "instructions", "Homework"), required(cleanDate(row.due_date), "due_date", "Homework"), now));
-    }
-    for (const row of curriculumRows) {
-      statements.push(db.prepare(`INSERT INTO curriculum (class_name,focus,subjects) VALUES (?,?,?) ON CONFLICT(class_name) DO UPDATE SET focus=excluded.focus,subjects=excluded.subjects`)
-        .bind(required(row.class_name, "class_name", "Curriculum").toUpperCase(), required(row.focus, "focus", "Curriculum"), required(row.subjects, "subjects", "Curriculum")));
-    }
-    for (const row of noticeRows) {
-      statements.push(db.prepare(`INSERT INTO notices (id,title,notice_date,body,audience,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,notice_date=excluded.notice_date,body=excluded.body,audience=excluded.audience`)
-        .bind(cleanId(row.notice_id, "NOT"), required(row.title, "title", "Notices"), required(cleanDate(row.notice_date), "notice_date", "Notices"), required(row.body, "body", "Notices"), cleanText(row.audience, "all").toLowerCase(), now));
-    }
-    for (const row of galleryRows) {
-      statements.push(db.prepare(`INSERT INTO gallery (id,title,event_date,image_url,created_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,event_date=excluded.event_date,image_url=excluded.image_url`)
-        .bind(cleanId(row.gallery_id, "GAL"), required(row.title, "title", "Gallery"), required(cleanDate(row.event_date), "event_date", "Gallery"), cleanText(row.image_url) || null, now));
-    }
-    await runInChunks(statements);
-
-    for (const row of accountRows) {
-      const role = cleanText(row.role).toLowerCase();
-      if (role !== "student" && role !== "teacher") throw new Error("Accounts: role must be student or teacher.");
-      const username = normalizeUsername(row.username);
-      const temporaryPassword = cleanText(row.temporary_password);
-      const passwordError = validatePassword(temporaryPassword);
-      if (!username || passwordError) throw new Error(`Accounts: ${username || "username"} - ${passwordError || "username is required."}`);
-      const studentId = role === "student" ? required(row.student_id, "student_id", "Accounts") : null;
-      const teacherId = role === "teacher" ? required(row.teacher_id, "teacher_id", "Accounts") : null;
-      const credential = await hashPassword(temporaryPassword);
-      await db.prepare(`INSERT INTO users (username,display_name,role,password_hash,password_salt,password_iterations,student_id,teacher_id,must_change_password,active,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,1,1,?,?) ON CONFLICT(username) DO UPDATE SET display_name=excluded.display_name,role=excluded.role,password_hash=excluded.password_hash,password_salt=excluded.password_salt,password_iterations=excluded.password_iterations,student_id=excluded.student_id,teacher_id=excluded.teacher_id,must_change_password=1,active=1,updated_at=excluded.updated_at`)
-        .bind(username, required(row.display_name, "display_name", "Accounts"), role, credential.hash, credential.salt, credential.iterations, studentId, teacherId, now, now).run();
-    }
-
-    const schoolRows = rows(data.school, 10);
-    if (schoolRows[0]) {
-      const schoolName = cleanText(schoolRows[0].school_name);
-      const academicYear = cleanText(schoolRows[0].academic_year);
-      const settingStatements = [];
-      if (schoolName) settingStatements.push(db.prepare("INSERT INTO settings (key,value) VALUES ('school_name',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(schoolName));
-      if (academicYear) settingStatements.push(db.prepare("INSERT INTO settings (key,value) VALUES ('academic_year',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(academicYear));
-      if (settingStatements.length) await db.batch(settingStatements);
-    }
-    if (installmentRows.length) await db.prepare("UPDATE students SET fee_paid=COALESCE((SELECT SUM(amount) FROM fee_installments WHERE student_id=students.id),fee_paid)").run();
-    const counts = { students: studentRows.length, teachers: teacherRows.length, accounts: accountRows.length, installments: installmentRows.length, attendance: attendanceRows.length, marks: markRows.length, homework: homeworkRows.length, curriculum: curriculumRows.length, notices: noticeRows.length, gallery: galleryRows.length };
-    await audit(auth.user.id, "excel_import", "school_data", undefined, { mode, counts });
-    return Response.json({ ok: true, mode, counts });
-  } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : "The workbook could not be imported." }, { status: 400 });
-  }
-}
+      if (!['student','teacher'].includes(type) || !['present','absent','late','half_day','leave'].includes(status)) throw new Error("Attendance: person_type or status is invalid.");
+      statements.push(db.prepare(`INSERT INTO attendance_records (id,person_type,person_id,attendance_date,status,note,marked_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(person_type,person_id,attendance_date) DO UPDATE SET status=excluded.status,note=excluded.note,marked_by=excluded.marked_by,updated_at=excluded.updated_at`)
+        .bind(cleanId(row.attendance_id, "ATT"), type, required(row.person_id, "zóNy¶‰žËkºwµç@¢V&Æ—6†VC¢–çFVvW"‚'V&Æ—6†VB"Â²ÖöFS¢&&ööÆVâ"Ò’ææ÷DçVÆÂ‚’æFVfVÇB‡G'VR’À¢7&VFVDC¢FW‡B‚&7&VFVEöB"’ææ÷DçVÆÂ‚’À¢WFFVDC¢FW‡B‚'WFFVEöB"’ææ÷DçVÆÂ‚’À§Ò“° ¦W‡÷'B6öç7BÖVF–76WG2Ò7Æ—FUF&ÆR‚&ÖVF–ö76WG2"Â°¢–C¢FW‡B‚&–B"’ç&–Ö'”¶W’‚’À¢÷væW%G—S¢FW‡B‚&÷væW%÷G—R"’ææ÷DçVÆÂ‚’À¢÷væW$–C¢FW‡B‚&÷væW%ö–B"’ææ÷DçVÆÂ‚’À¢¶–æC¢FW‡B‚&¶–æB"’ææ÷DçVÆÂ‚’À¢ö&¦V7D¶W“¢FW‡B‚&ö&¦V7Eö¶W’"’ææ÷DçVÆÂ‚’À¢f–ÆVæÖS¢FW‡B‚&f–ÆVæÖR"’ææ÷DçVÆÂ‚’À¢Ö–ÖUG—S¢FW‡B‚&Ö–ÖU÷G—R"’ææ÷DçVÆÂ‚’À¢6—¦T'—FW3¢–çFVvW"‚'6—¦Uö'—FW2"’ææ÷DçVÆÂ‚’À¢6F–öã¢FW‡B‚&6F–öâ"’À¢WÆöFVD'“¢–çFVvW"‚'WÆöFVEö'’"’À¢7&VFVDC¢FW‡B‚&7&VFVEöB"’ææ÷DçVÆÂ‚’À§Ò“° 
